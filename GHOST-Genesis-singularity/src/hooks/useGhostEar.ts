@@ -9,7 +9,7 @@ export const useGhostEar = (uid: string) => {
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const accumulatedFinal = useRef<string>('');
 
-  const SILENCE_THRESHOLD = 1400; // Ajuste aqui: 1200 = rápido / 1800 = paciente
+  const SILENCE_THRESHOLD = 1400; // Ajuste: 1200 = agressivo / 1800 = paciente
 
   const speak = useCallback((text: string) => {
     if (!text.trim()) return;
@@ -40,9 +40,38 @@ export const useGhostEar = (uid: string) => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
     silenceTimerRef.current = setTimeout(() => {
-      const textToSend = accumulatedFinal.current.trim();
-      if (textToSend) {
-        sendToGhost(textToSend);
+      const rawText = accumulatedFinal.current.trim();
+      if (!rawText) {
+        accumulatedFinal.current = '';
+        setTranscript('');
+        return;
+      }
+
+      const lowerText = rawText.toLowerCase();
+
+      // LÓGICA DE WAKE-WORD: só processa se contiver "ghost" (case-insensitive)
+      if (lowerText.includes('ghost')) {
+        // Remove todas as ocorrências de "ghost" (ou "Ghost", "GHOST", etc.)
+        let cleanCommand = rawText.replace(/ghost/gi, '').trim();
+
+        // Limpa vírgulas/espaços extras no início e fim
+        cleanCommand = cleanCommand.replace(/^[,\s]+|[,\s]+$/g, '').trim();
+
+        if (cleanCommand) {
+          console.log(`[WAKE-WORD] Ativado. Enviando comando: "${cleanCommand}"`);
+          sendToGhost(cleanCommand);
+        } else {
+          // Apenas "ghost" foi dito → confirma presença
+          speak('Sim, Senhor Walker. Estou às ordens.');
+          console.log('[WAKE-WORD] Apenas invocação detectada.');
+        }
+
+        // Limpa buffer após processar
+        accumulatedFinal.current = '';
+        setTranscript('');
+      } else if (rawText.length > 0) {
+        // Ignora completamente (não envia nem acumula)
+        console.log(`[STEALTH] Ignorando fala sem wake-word: "${rawText}"`);
         accumulatedFinal.current = '';
         setTranscript('');
       }
@@ -52,16 +81,16 @@ export const useGhostEar = (uid: string) => {
   const startListening = useCallback(() => {
     if (isListening) return;
 
-    const SpeechRecognition =
+    const SpeechRecognitionClass =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
+    if (!SpeechRecognitionClass) {
       console.error('Web Speech API não suportada.');
       speak('Microfone não disponível neste ambiente.');
       return;
     }
 
-    const recognition = new SpeechRecognition();
+    const recognition = new SpeechRecognitionClass() as SpeechRecognition;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'pt-BR';
@@ -85,13 +114,12 @@ export const useGhostEar = (uid: string) => {
 
       setTranscript(accumulatedFinal.current.trim() + (interim ? ' ' + interim : ''));
 
-      startSilenceTimer(); // Reinicia timer a cada atividade
+      startSilenceTimer();
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.warn('Erro no reconhecimento de voz:', event.error);
       if (event.error === 'no-speech' || event.error === 'aborted') {
-        // Erros leves → reinicia silenciosamente
         restart();
       } else if (event.error === 'not-allowed') {
         speak('Permissão de microfone negada. Verifique as configurações.');
@@ -103,7 +131,6 @@ export const useGhostEar = (uid: string) => {
 
     recognition.onend = () => {
       if (isListening) {
-        // Proteção contra onend prematuro
         restartTimeoutRef.current = setTimeout(restart, 500);
       }
     };
@@ -111,7 +138,6 @@ export const useGhostEar = (uid: string) => {
     const restart = () => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
-        recognitionRef.current = null;
       }
       recognition.start();
       recognitionRef.current = recognition;
