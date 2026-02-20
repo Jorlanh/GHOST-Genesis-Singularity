@@ -1,47 +1,37 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
+import { exec } from 'child_process' // IMPORTANTE: O executor físico
 import path from 'node:path'
 
-// The built directory structure
-//
-// ├─┬─ dist
-// │ └── index.html
-// │
-// ├─┬─ dist-electron
-// │ ├── main.js
-// │ └── preload.js
-//
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../public')
 
 let win: BrowserWindow | null
 
-// 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC as string, 'favicon.ico'),    width: 1200,
+    icon: path.join(process.env.VITE_PUBLIC as string, 'favicon.ico'),
+    width: 1200,
     height: 800,
-    frame: true, // Mude para false se quiser sem bordas (Stealth puro)
+    frame: true, 
     backgroundColor: '#000000',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false, // Permite comunicação direta (Cuidado em prod)
+      nodeIntegration: false, // Melhor manter false quando usar preload
+      contextIsolation: true, // OBRIGATÓRIO TRUE para o contextBridge funcionar
+      preload: path.join(__dirname, 'preload.mjs'), // Aponta para o arquivo de ponte
     },
   })
 
-  // Ocultar barra de menu (Modo Tático)
   win.setMenuBarVisibility(false)
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // win.loadFile('dist/index.html')
     win.loadFile(path.join(process.env.DIST as string, 'index.html'))
   }
 }
 
-// Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
@@ -56,3 +46,18 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(createWindow)
+
+// ----------------------------------------------------
+// O MÚSCULO FÍSICO DO GHOST (Escuta as ordens do React)
+// ----------------------------------------------------
+ipcMain.on('execute-os-command', (event, command) => {
+  console.log('GHOST >> Executando no SO Local:', command);
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`GHOST Erro Físico: ${error.message}`);
+      return;
+    }
+    if (stderr) console.error(`GHOST Alerta: ${stderr}`);
+    console.log(`GHOST Sucesso: ${stdout}`);
+  });
+});

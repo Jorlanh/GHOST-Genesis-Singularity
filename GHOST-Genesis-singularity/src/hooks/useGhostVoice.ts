@@ -57,31 +57,37 @@ export function useGhostVoice(): GhostVoiceResult {
       return;
     }
 
-    // 3. Processamento via Ghost Core (Cérebro com IA e Gírias)
+    // 3. Processamento via Ghost Core Híbrido
     try {
-      // Limpa a wake word para enviar apenas a intenção ao backend
       const cleanCommand = lower.replace(new RegExp(WAKE_WORDS.join('|'), 'g'), '').trim();
 
-      // O Core usará o Gemini Flash para gerar a resposta com a personalidade "resenha"
-      const result = await fetch("http://localhost:8080/api/v1/command", {
+      // Ajustado para porta 8081 (conforme seu YML) e payload de Elite
+      const result = await fetch("http://localhost:8081/api/v1/ghost/interact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           command: cleanCommand,
-          user: currentNickname,
+          uid: "ID_DO_WALKER", // Importante para ativar o God Mode no Java
+          clientSource: "ELECTRON", // Matriz de decisão Híbrida
           context: "stealth_mode"
         })
       });
 
       const data = await result.json();
       
-      if (data.reply) {
-        setLastSpokenText(data.reply);
-        // O GHOST executa a resposta vocal brasileira
-        speak(data.reply, undefined, () => setVortexState("listening"));
+      // 4. A MÁGICA FÍSICA ACONTECE AQUI (Delegação do Electron)
+      if (data.osCommand && window.electronAPI) {
+        console.log("GHOST >> Executando ação física no SO:", data.osCommand);
+        window.electronAPI.sendOSCommand(data.osCommand);
+      }
+
+      // 5. O GHOST fala a resposta (Prioriza o neural, faz fallback pro texto)
+      const textToSpeak = data.response || data.reply;
+      if (textToSpeak) {
+        setLastSpokenText(textToSpeak);
+        speak(textToSpeak, undefined, () => setVortexState("listening"));
       }
     } catch (error) {
-      // Fallback tático em caso de falha de conexão
       const errorMsg = "Tô fora de área, chefe. O servidor deu linha.";
       setLastSpokenText(errorMsg);
       speak(errorMsg, undefined, () => setVortexState("listening"));

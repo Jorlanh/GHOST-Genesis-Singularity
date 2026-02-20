@@ -1,15 +1,61 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
+import api from '../lib/api'; // Conexão centralizada
+
+interface GhostResponse {
+  response: string;
+  audioUrl?: string;
+  user: string;
+  status: string;
+}
 
 export const useGhostEar = (uid: string) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const accumulatedFinal = useRef<string>('');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const SILENCE_THRESHOLD = 1400; // Ajuste: 1200 = agressivo / 1800 = paciente
+  const SILENCE_THRESHOLD = 1400;
+
+  const playAudio = useCallback((relativePath: string) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+
+    // Monta URL completa (remove /api/v1/ghost do baseURL do axios)
+    const baseUrl = api.defaults.baseURL?.replace('/api/v1/ghost', '') || 'http://localhost:8081';
+    const fullUrl = `${baseUrl}${relativePath.startsWith('/') ? '' : '/'}${relativePath}`;
+
+    const audio = new Audio(fullUrl);
+    audioRef.current = audio;
+
+    setIsSpeaking(true);
+
+    audio.onended = () => {
+      setIsSpeaking(false);
+      audioRef.current = null;
+      // Opcional: voltar a escutar após falar
+      // startListening();
+    };
+
+    audio.onerror = (e) => {
+      console.error('Erro ao tocar áudio neural:', e);
+      setIsSpeaking(false);
+      audioRef.current = null;
+    };
+
+    audio.play().catch(err => {
+      console.error('Autoplay bloqueado:', err);
+      setIsSpeaking(false);
+      speak('Desculpe, erro ao reproduzir minha voz.');
+    });
+  }, []);
 
   const speak = useCallback((text: string) => {
     if (!text.trim()) return;
@@ -17,24 +63,34 @@ export const useGhostEar = (uid: string) => {
     utterance.lang = 'pt-BR';
     utterance.rate = 1.1;
     utterance.volume = 1.0;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+
     window.speechSynthesis.speak(utterance);
   }, []);
 
   const sendToGhost = useCallback(async (text: string) => {
     if (!text.trim()) return;
     try {
-      const res = await axios.post('http://localhost:8081/api/v1/ghost/interact', {
+      const res = await api.post<GhostResponse>('/interact', {
         command: text.trim(),
         uid,
       });
-      const responseText = res.data.response ?? 'Entendi, Senhor.';
-      console.log('GHOST respondeu:', responseText);
-      speak(responseText);
+
+      const { response, audioUrl } = res.data;
+      console.log('GHOST:', response);
+
+      if (audioUrl && audioUrl.trim()) {
+        playAudio(audioUrl);
+      } else {
+        speak(response);
+      }
     } catch (err) {
-      console.error('Erro na interação com o core:', err);
-      speak('Desculpe, tive um problema ao processar. Tente novamente.');
+      console.error('Falha de conexão com o núcleo:', err);
+      speak('Sem conexão com o núcleo. Estou em modo de espera.');
     }
-  }, [uid, speak]);
+  }, [playAudio, speak]);
 
   const startSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -49,29 +105,21 @@ export const useGhostEar = (uid: string) => {
 
       const lowerText = rawText.toLowerCase();
 
-      // LÓGICA DE WAKE-WORD: só processa se contiver "ghost" (case-insensitive)
       if (lowerText.includes('ghost')) {
-        // Remove todas as ocorrências de "ghost" (ou "Ghost", "GHOST", etc.)
         let cleanCommand = rawText.replace(/ghost/gi, '').trim();
-
-        // Limpa vírgulas/espaços extras no início e fim
         cleanCommand = cleanCommand.replace(/^[,\s]+|[,\s]+$/g, '').trim();
 
         if (cleanCommand) {
-          console.log(`[WAKE-WORD] Ativado. Enviando comando: "${cleanCommand}"`);
+          console.log(`[WAKE-WORD] Comando enviado: "${cleanCommand}"`);
           sendToGhost(cleanCommand);
         } else {
-          // Apenas "ghost" foi dito → confirma presença
-          speak('Sim, Senhor Walker. Estou às ordens.');
-          console.log('[WAKE-WORD] Apenas invocação detectada.');
+          speak('Sim, Senhor Walker. Às suas ordens.');
         }
 
-        // Limpa buffer após processar
         accumulatedFinal.current = '';
         setTranscript('');
       } else if (rawText.length > 0) {
-        // Ignora completamente (não envia nem acumula)
-        console.log(`[STEALTH] Ignorando fala sem wake-word: "${rawText}"`);
+        console.log(`[STEALTH] Ignorado (sem wake-word): "${rawText}"`);
         accumulatedFinal.current = '';
         setTranscript('');
       }
@@ -118,14 +166,12 @@ export const useGhostEar = (uid: string) => {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.warn('Erro no reconhecimento de voz:', event.error);
+      console.warn('Erro no reconhecimento:', event.error);
       if (event.error === 'no-speech' || event.error === 'aborted') {
         restart();
       } else if (event.error === 'not-allowed') {
         speak('Permissão de microfone negada. Verifique as configurações.');
         setIsListening(false);
-      } else {
-        console.warn('Erro não tratado:', event.error);
       }
     };
 
@@ -139,7 +185,11 @@ export const useGhostEar = (uid: string) => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
       }
-      recognition.start();
+      try {
+        recognition.start();
+      } catch (e) {
+        console.warn('Erro ao reiniciar recognition:', e);
+      }
       recognitionRef.current = recognition;
     };
 
@@ -163,5 +213,5 @@ export const useGhostEar = (uid: string) => {
     return () => stopListening();
   }, [stopListening]);
 
-  return { isListening, transcript, startListening, stopListening };
+  return { isListening, transcript, isSpeaking, startListening, stopListening };
 };
