@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { LayoutDashboard, Calendar, Cpu, Settings, Menu, X, Mic, Bluetooth } from "lucide-react";
+import GhostStatus from "./ghost/GhostStatus";
 
 const navItems = [
   { title: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
@@ -76,7 +77,7 @@ const Layout = ({ children }: LayoutProps) => {
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 py-4 px-2 space-y-1">
+            <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
               {navItems.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
@@ -99,16 +100,19 @@ const Layout = ({ children }: LayoutProps) => {
               })}
             </nav>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-border/20 text-[9px] text-primary/40 tracking-wider">
-              OPERATOR: AUTHORIZED
+            {/* Footer with Integrated Status */}
+            <div className="p-4 border-t border-border/20 space-y-4">
+              <GhostStatus />
+              <div className="text-[9px] text-primary/40 tracking-wider uppercase">
+                OPERATOR: AUTHORIZED
+              </div>
             </div>
           </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* Main */}
-      <main className="flex-1 h-full overflow-auto">
+      {/* Main Content Area */}
+      <main className="flex-1 h-full overflow-auto bg-black relative">
         {children}
       </main>
     </div>

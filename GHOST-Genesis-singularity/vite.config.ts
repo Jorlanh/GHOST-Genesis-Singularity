@@ -7,6 +7,17 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8083,
+    // Adicionando o túnel para o seu Gateway GHOST
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+        // Remove o prefixo /api antes de enviar para o Gateway, 
+        // caso o seu Gateway não espere o /api na URL
+        rewrite: (path) => path.replace(/^\/api/, '') 
+      }
+    }
   },
   plugins: [
     react(),
@@ -17,6 +28,8 @@ export default defineConfig(({ mode }) => ({
       preload: {
         input: 'electron/preload.ts',
       },
+      // Caso queira que o renderer recarregue ao mudar o main do electron
+      renderer: {}, 
     }),
   ],
   resolve: {

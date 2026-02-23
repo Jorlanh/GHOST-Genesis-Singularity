@@ -1,10 +1,9 @@
 import axios from 'axios';
 
-// Define a URL base do Cérebro (Backend)
-// Se você mudar a porta no application.yaml, mude APENAS aqui.
+// O GHOST agora consome dinamicamente o ambiente via VITE_
 const api = axios.create({
-  baseURL: 'http://localhost:8081/api/v1/ghost',
-  timeout: 30000, // 30 segundos de tolerância para o LLM pensar
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1/ghost',
+  timeout: 10000, // Reduzido para 10s para melhorar a responsividade
   headers: {
     'Content-Type': 'application/json',
   },

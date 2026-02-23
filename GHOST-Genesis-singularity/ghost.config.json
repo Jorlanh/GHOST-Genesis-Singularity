@@ -1,0 +1,18 @@
+{
+  "system": {
+    "name": "GHOST Genesis",
+    "version": "1.0.0-singularity",
+    "operator": "Senhor Walker",
+    "stealth_mode": true
+  },
+  "paths": {
+    "nircmd": "./resources/nircmd.exe",
+    "logs": "./logs/ghost_thermal.log",
+    "patches": "./patches"
+  },
+  "performance": {
+    "panic_latency_threshold_ms": 500,
+    "eureka_check_interval_ms": 60000,
+    "audio_keep_alive_interval_ms": 25000
+  }
+}

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import api from "@/lib/api";
 
 type VortexState = "idle" | "listening" | "processing";
 
-// Wake Words oficiais do protocolo
 const WAKE_WORDS = ["ghost", "chrono", "turing", "gör"];
 
 interface GhostVoiceResult {
@@ -10,6 +10,7 @@ interface GhostVoiceResult {
   currentNickname: string;
   lastSpokenText: string;
   isSupported: boolean;
+  startListening: () => void;
 }
 
 function getGreeting(): string {
@@ -19,37 +20,92 @@ function getGreeting(): string {
   return "Boa noite";
 }
 
-// Síntese de voz com foco em PT-BR para suportar as gírias
+/**
+ * PROTOCOLO DE VOZ: Garante que o GHOST interrompa falas anteriores.
+ */
 function speak(text: string, onStart?: () => void, onEnd?: () => void) {
+  if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
+  }
+
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "pt-BR";
-  utter.rate = 1.1; // Levemente mais rápido para parecer natural
+  utter.rate = 1.1;
   utter.pitch = 1;
+  
   if (onStart) utter.onstart = onStart;
   if (onEnd) utter.onend = onEnd;
+  
   window.speechSynthesis.speak(utter);
 }
 
 export function useGhostVoice(): GhostVoiceResult {
-  const [vortexState, setVortexState] = useState<VortexState>("listening");
-  const [currentNickname, setCurrentNickname] = useState("Senhor Walker");
+  const [vortexState, setVortexState] = useState<VortexState>("idle");
+  const [currentNickname] = useState("Senhor Walker");
   const [lastSpokenText, setLastSpokenText] = useState("");
   const [isSupported] = useState(() => "webkitSpeechRecognition" in window || "SpeechRecognition" in window);
+  
   const recognitionRef = useRef<any>(null);
   const restartTimeoutRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // MARCAPASSO DE ÁUDIO: Mantém o barramento ativo
+  const keepAudioAlive = useCallback(() => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const osc = audioContextRef.current.createOscillator();
+      const gain = audioContextRef.current.createGain();
+      gain.gain.value = 0.0001; 
+      osc.connect(gain);
+      gain.connect(audioContextRef.current.destination);
+      osc.start();
+      osc.stop(audioContextRef.current.currentTime + 0.1);
+    } catch (e) {
+      console.warn("GHOST >> Falha no marcapasso de áudio");
+    }
+  }, []);
 
   const processCommand = useCallback(async (transcript: string) => {
     const lower = transcript.toLowerCase().trim();
-
-    // 1. Verificação de Gatilhos
     const hasWakeWord = WAKE_WORDS.some(w => lower.includes(w));
     const isWakeUp = lower.includes("acorda") && lower.includes("papai");
 
     if (!hasWakeWord && !isWakeUp) return;
 
     setVortexState("processing");
+    keepAudioAlive();
+    const electron = (window as any).electronAPI;
 
-    // 2. Lógica "God Mode" (Instantânea/Local)
+    // PROTOCOLO MODO PÂNICO
+    if (lower.includes("modo pânico") || lower.includes("limpar rastro")) {
+      if (electron) electron.sendOSCommand('PANIC_MODE');
+      const resp = "Protocolo Pânico ativado. Navegadores encerrados e trilhas removidas.";
+      setLastSpokenText(resp);
+      speak(resp, undefined, () => setVortexState("listening"));
+      return;
+    }
+
+    // PROTOCOLO DE INTERFACE
+    if (lower.includes("mostrar terminal") || lower.includes("exibir interface") || lower.includes("apareça")) {
+      if (electron) electron.showWindow();
+      const resp = "Protocolo visual restaurado.";
+      setLastSpokenText(resp);
+      speak(resp, undefined, () => setVortexState("listening"));
+      return;
+    }
+
+    if (lower.includes("esconder terminal") || lower.includes("ocultar interface") || lower.includes("desapareça")) {
+      const resp = "Entrando em modo stealth.";
+      setLastSpokenText(resp);
+      speak(resp, undefined, () => {
+        if (electron) electron.hideWindow();
+        setVortexState("listening");
+      });
+      return;
+    }
+
     if (isWakeUp) {
       const response = `${getGreeting()}, para o senhor eu sempre estou acordado, ${currentNickname}.`;
       setLastSpokenText(response);
@@ -57,42 +113,35 @@ export function useGhostVoice(): GhostVoiceResult {
       return;
     }
 
-    // 3. Processamento via Ghost Core Híbrido
+    // INTERAÇÃO COM GATEWAY (SINGULARIDADE)
     try {
       const cleanCommand = lower.replace(new RegExp(WAKE_WORDS.join('|'), 'g'), '').trim();
-
-      // Ajustado para porta 8081 (conforme seu YML) e payload de Elite
-      const result = await fetch("http://localhost:8081/api/v1/ghost/interact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          command: cleanCommand,
-          uid: "ID_DO_WALKER", // Importante para ativar o God Mode no Java
-          clientSource: "ELECTRON", // Matriz de decisão Híbrida
-          context: "stealth_mode"
-        })
+      const response = await api.post('/interact', {
+        command: cleanCommand,
+        uid: import.meta.env.VITE_OPERATOR_UID || "GHOST_UNAUTHORIZED", 
+        clientSource: electron ? "ELECTRON" : "WEB",
+        context: "stealth_mode"
       });
 
-      const data = await result.json();
-      
-      // 4. A MÁGICA FÍSICA ACONTECE AQUI (Delegação do Electron)
-      if (data.osCommand && window.electronAPI) {
-        console.log("GHOST >> Executando ação física no SO:", data.osCommand);
-        window.electronAPI.sendOSCommand(data.osCommand);
+      const data = response.data; 
+
+      if (data.osCommand && electron) {
+        electron.sendOSCommand(data.osCommand);
       }
 
-      // 5. O GHOST fala a resposta (Prioriza o neural, faz fallback pro texto)
       const textToSpeak = data.response || data.reply;
       if (textToSpeak) {
         setLastSpokenText(textToSpeak);
         speak(textToSpeak, undefined, () => setVortexState("listening"));
+      } else {
+        setVortexState("listening");
       }
     } catch (error) {
-      const errorMsg = "Tô fora de área, chefe. O servidor deu linha.";
+      const errorMsg = "Conexão com a Singularidade interrompida.";
       setLastSpokenText(errorMsg);
-      speak(errorMsg, undefined, () => setVortexState("listening"));
+      speak(errorMsg, undefined, () => setVortexState("idle"));
     }
-  }, [currentNickname]);
+  }, [currentNickname, keepAudioAlive]);
 
   const startListening = useCallback(() => {
     if (!isSupported || recognitionRef.current) return;
@@ -110,34 +159,43 @@ export function useGhostVoice(): GhostVoiceResult {
       }
     };
 
-    recognition.onerror = () => {
-      recognitionRef.current = null;
-      restartTimeoutRef.current = setTimeout(startListening, 1000);
-    };
-
     recognition.onend = () => {
       recognitionRef.current = null;
-      restartTimeoutRef.current = setTimeout(startListening, 300);
+      restartTimeoutRef.current = setTimeout(startListening, 100);
     };
 
     try {
       recognition.start();
       recognitionRef.current = recognition;
       setVortexState("listening");
-    } catch {
+    } catch (err) {
       restartTimeoutRef.current = setTimeout(startListening, 1000);
     }
   }, [isSupported, processCommand]);
 
+  // CICLO DE VIDA E CLEANUP DE PROTOCOLO IPC
   useEffect(() => {
     startListening();
+    const pulse = setInterval(keepAudioAlive, 25000);
+
+    // Incremento de Auditoria: Escuta os resultados vindos do Main Process
+    const electron = (window as any).electronAPI;
+    let removeListener: (() => void) | undefined;
+
+    if (electron && electron.onCommandResult) {
+      removeListener = electron.onCommandResult((data: any) => {
+        console.log("GHOST >> Auditoria de Comando:", data);
+        // Aqui você pode disparar sons ou feedbacks visuais de sucesso/erro
+      });
+    }
+
     return () => {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-      }
+      clearInterval(pulse);
+      if (removeListener) removeListener(); // <--- CLEANUP ESSENCIAL
+      if (recognitionRef.current) try { recognitionRef.current.stop(); } catch {}
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
     };
-  }, [startListening]);
+  }, [startListening, keepAudioAlive]);
 
-  return { vortexState, currentNickname, lastSpokenText, isSupported };
+  return { vortexState, currentNickname, lastSpokenText, isSupported, startListening };
 }

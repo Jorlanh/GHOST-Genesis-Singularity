@@ -11,10 +11,12 @@
     "build": "tsc && vite build",
     "dist": "npm run build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "node -e \"const fs=require('fs'); if(!fs.existsSync('./resources')) fs.mkdirSync('./resources'); if(!fs.existsSync('./resources/nircmd.exe')) console.warn('GHOST >> AVISO: nircmd.exe ausente em ./resources. Baixe-o para controle de hardware.')\""
   },
   "dependencies": {
     "@capacitor/core": "^8.1.0",
+    "@emotion/is-prop-valid": "^1.4.0",
     "@radix-ui/react-slider": "^1.3.6",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-toast": "^1.2.15",
@@ -56,6 +58,24 @@
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
     "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.0.18"
+  },
+  "build": {
+    "appId": "com.ghost.genesis",
+    "productName": "Ghost Genesis Singularity",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "resources/nircmd.exe",
+        "to": "nircmd.exe"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "requestedExecutionLevel": "requireAdministrator"
+    }
   }
 }
