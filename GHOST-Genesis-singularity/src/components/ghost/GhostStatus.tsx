@@ -2,62 +2,56 @@ import React, { useEffect, useState, useRef } from 'react';
 
 const GhostStatus: React.FC = () => {
   const [status, setStatus] = useState<'ONLINE' | 'OFFLINE' | 'CHECKING' | 'WEB_MODE'>('CHECKING');
-  // useRef para armazenar o estado anterior sem disparar re-renderizações
   const prevStatusRef = useRef<'ONLINE' | 'OFFLINE' | 'CHECKING' | 'WEB_MODE'>('CHECKING');
 
-  // Função de Text-to-Speech calibrada para tom de elite
   const announceStatus = (text: string) => {
-    // Evita falar se a janela for recarregada repetidamente
     if (window.speechSynthesis.speaking) return;
     
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'pt-BR';
-    utterance.rate = 0.9;  // Cadência calculada
-    utterance.pitch = 0.8; // Tom mais grave/autoritário
+    utterance.rate = 0.9;
+    utterance.pitch = 0.8;
     window.speechSynthesis.speak(utterance);
   };
 
   const checkConnectivity = async () => {
     try {
       const electron = (window as any).electronAPI;
-      
-      // BLINDAGEM CONTRA O ERRO DE UNDEFINED (GHOST_INFRA_ERROR)
       if (electron && typeof electron.checkStatus === 'function') {
         const result = await electron.checkStatus();
         setStatus(result as 'ONLINE' | 'OFFLINE');
       } else {
-        // Modo Web: Usado quando aberto no navegador normal (fora do Electron)
         setStatus('WEB_MODE');
       }
     } catch (error) {
-      console.error("GHOST_INFRA_ERROR:", error);
       setStatus('OFFLINE');
     }
   };
 
-  // Ciclo de Heartbeat (5s)
   useEffect(() => {
     checkConnectivity();
     const interval = setInterval(checkConnectivity, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // Monitor de Transição de Estado (Lógica de Voz)
+  // BLINDAGEM ANTI-LOOP COM SESSION STORAGE
   useEffect(() => {
     if (status === 'ONLINE' && prevStatusRef.current !== 'ONLINE') {
-      announceStatus("Gateway GHOST sincronizado. Sistemas sob seu comando, Senhor Walker.");
+      // Verifica na sessão profunda se já fomos cumprimentados
+      if (!sessionStorage.getItem('ghost_greeted')) {
+        announceStatus("Gateway GHOST sincronizado. Sistemas sob seu comando, Senhor Walker.");
+        sessionStorage.setItem('ghost_greeted', 'true');
+      }
     } 
     else if (status === 'OFFLINE' && prevStatusRef.current === 'ONLINE') {
       announceStatus("Alerta crítico. Conexão com o Gateway perdida.");
     }
 
-    // Atualiza a referência para a próxima verificação
     prevStatusRef.current = status;
   }, [status]);
 
   return (
     <div className="flex items-center gap-3 bg-primary/5 border border-primary/10 p-2.5 rounded-sm font-mono">
-      {/* Indicador de Pulso Visual */}
       <div className="relative flex h-2 w-2">
         {status === 'ONLINE' && (
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-40"></span>

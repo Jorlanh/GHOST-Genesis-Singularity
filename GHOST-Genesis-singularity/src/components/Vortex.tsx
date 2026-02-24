@@ -7,6 +7,10 @@ interface VortexProps {
   state?: VortexState;
   size?: number;
   accentColor?: string;
+  // NOVOS SENSORES DE INTERAÇÃO (PUSH-TO-TALK)
+  onPointerDown?: () => void;
+  onPointerUp?: () => void;
+  onPointerLeave?: () => void;
 }
 
 // Protocolo de cores: Mapeamento de espectro por estado de sistema
@@ -18,7 +22,7 @@ const STATE_COLORS: Record<VortexState, string> = {
   error: "hsl(35 100% 50%)",       // Âmbar (Falha de sistema)
 };
 
-const Vortex = ({ state = "idle", size = 280, accentColor }: VortexProps) => {
+const Vortex = ({ state = "idle", size = 280, accentColor, onPointerDown, onPointerUp, onPointerLeave }: VortexProps) => {
   const color = accentColor || STATE_COLORS[state];
 
   const rings = [
@@ -40,29 +44,33 @@ const Vortex = ({ state = "idle", size = 280, accentColor }: VortexProps) => {
 
   return (
     <motion.div
-      className="relative flex items-center justify-center"
-      style={{ width: size, height: size }}
+      className="relative flex items-center justify-center cursor-pointer touch-none select-none"
+      style={{ width: size, height: size, WebkitTapHighlightColor: "transparent" }}
       animate={{ 
-        scale: state === "panic" ? [1, 1.15, 0.95, 1.1, 1] : [1, 1.03, 1],
+        scale: state === "panic" ? [1, 1.15, 0.95, 1.1, 1] : state === "listening" ? 1.05 : [1, 1.03, 1],
         filter: state === "panic" ? "contrast(1.5) brightness(1.2)" : "contrast(1) brightness(1)"
       }}
       transition={{
-        duration: state === "panic" ? 0.15 : 4,
-        repeat: Infinity,
+        duration: state === "panic" ? 0.15 : state === "listening" ? 0.2 : 4,
+        repeat: state === "listening" ? 0 : Infinity,
         ease: "easeInOut",
       }}
+      // SENSORES DE ÁUDIO ATIVADOS
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerLeave}
     >
       {/* Halo de Brilho Atmosférico */}
       <motion.div
         className="absolute inset-0 rounded-full"
-        animate={{ opacity: [0.1, 0.3, 0.1] }}
+        animate={{ opacity: state === "listening" ? 0.5 : [0.1, 0.3, 0.1] }}
         transition={{ duration: 2, repeat: Infinity }}
         style={{
           background: `radial-gradient(circle, ${color.replace(")", " / 0.2)")} 0%, transparent 75%)`,
         }}
       />
 
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute pointer-events-none">
         <defs>
           <filter id="glow">
             <feGaussianBlur stdDeviation={state === "panic" ? "6" : "3"} result="coloredBlur" />
@@ -102,7 +110,7 @@ const Vortex = ({ state = "idle", size = 280, accentColor }: VortexProps) => {
 
       {/* Núcleo Central (Singularidade) */}
       <motion.div
-        className="absolute rounded-full z-10"
+        className="absolute rounded-full z-10 pointer-events-none"
         style={{
           width: size * 0.25,
           height: size * 0.25,
@@ -113,7 +121,7 @@ const Vortex = ({ state = "idle", size = 280, accentColor }: VortexProps) => {
         transition={{ duration: 0.5, repeat: Infinity }}
       />
 
-      {/* Interface de Glitch Unificada (Solução Erro 17001) */}
+      {/* Interface de Glitch Unificada */}
       <AnimatePresence>
         {(state === "processing" || state === "panic") && (
           <motion.div
@@ -125,7 +133,7 @@ const Vortex = ({ state = "idle", size = 280, accentColor }: VortexProps) => {
               borderWidth: ["1px", "4px", "1px"]
             }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 rounded-full border-2"
+            className="absolute inset-0 rounded-full border-2 pointer-events-none"
             style={{ borderColor: color }}
             transition={{ 
               duration: state === "panic" ? 0.1 : 0.4, 

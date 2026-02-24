@@ -10,7 +10,9 @@ interface GhostVoiceResult {
   currentNickname: string;
   lastSpokenText: string;
   isSupported: boolean;
-  startListening: () => void;
+  startRecording: () => void;
+  stopRecording: () => void;
+  processTextCommand: (transcript: string) => Promise<void>; // Mantido para entradas de texto
 }
 
 function getGreeting(): string {
@@ -43,10 +45,12 @@ export function useGhostVoice(): GhostVoiceResult {
   const [vortexState, setVortexState] = useState<VortexState>("idle");
   const [currentNickname] = useState("Senhor Walker");
   const [lastSpokenText, setLastSpokenText] = useState("");
-  const [isSupported] = useState(() => "webkitSpeechRecognition" in window || "SpeechRecognition" in window);
   
-  const recognitionRef = useRef<any>(null);
-  const restartTimeoutRef = useRef<any>(null);
+  // Alterado para verificar suporte de Hardware real em vez de API web
+  const [isSupported] = useState(() => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
 
   // MARCAPASSO DE ÁUDIO: Mantém o barramento ativo
@@ -67,7 +71,10 @@ export function useGhostVoice(): GhostVoiceResult {
     }
   }, []);
 
-  const processCommand = useCallback(async (transcript: string) => {
+  // =========================================================================
+  // PROTOCOLO ORIGINAL MANTIDO (Para Terminal de Texto / Fallbacks)
+  // =========================================================================
+  const processTextCommand = useCallback(async (transcript: string) => {
     const lower = transcript.toLowerCase().trim();
     const hasWakeWord = WAKE_WORDS.some(w => lower.includes(w));
     const isWakeUp = lower.includes("acorda") && lower.includes("papai");
@@ -78,21 +85,19 @@ export function useGhostVoice(): GhostVoiceResult {
     keepAudioAlive();
     const electron = (window as any).electronAPI;
 
-    // PROTOCOLO MODO PÂNICO
     if (lower.includes("modo pânico") || lower.includes("limpar rastro")) {
       if (electron) electron.sendOSCommand('PANIC_MODE');
       const resp = "Protocolo Pânico ativado. Navegadores encerrados e trilhas removidas.";
       setLastSpokenText(resp);
-      speak(resp, undefined, () => setVortexState("listening"));
+      speak(resp, undefined, () => setVortexState("idle"));
       return;
     }
 
-    // PROTOCOLO DE INTERFACE
     if (lower.includes("mostrar terminal") || lower.includes("exibir interface") || lower.includes("apareça")) {
       if (electron) electron.showWindow();
       const resp = "Protocolo visual restaurado.";
       setLastSpokenText(resp);
-      speak(resp, undefined, () => setVortexState("listening"));
+      speak(resp, undefined, () => setVortexState("idle"));
       return;
     }
 
@@ -101,7 +106,7 @@ export function useGhostVoice(): GhostVoiceResult {
       setLastSpokenText(resp);
       speak(resp, undefined, () => {
         if (electron) electron.hideWindow();
-        setVortexState("listening");
+        setVortexState("idle");
       });
       return;
     }
@@ -109,22 +114,56 @@ export function useGhostVoice(): GhostVoiceResult {
     if (isWakeUp) {
       const response = `${getGreeting()}, para o senhor eu sempre estou acordado, ${currentNickname}.`;
       setLastSpokenText(response);
-      speak(response, undefined, () => setVortexState("listening"));
+      speak(response, undefined, () => setVortexState("idle"));
       return;
     }
 
-    // INTERAÇÃO COM GATEWAY (SINGULARIDADE)
     try {
       const cleanCommand = lower.replace(new RegExp(WAKE_WORDS.join('|'), 'g'), '').trim();
       const response = await api.post('/interact', {
         command: cleanCommand,
-        uid: import.meta.env.VITE_OPERATOR_UID || "GHOST_UNAUTHORIZED", 
+        uid: import.meta.env.VITE_OPERATOR_UID || "Walker", 
         clientSource: electron ? "ELECTRON" : "WEB",
         context: "stealth_mode"
       });
 
       const data = response.data; 
+      if (data.osCommand && electron) electron.sendOSCommand(data.osCommand);
 
+      const textToSpeak = data.response || data.reply;
+      if (textToSpeak) {
+        setLastSpokenText(textToSpeak);
+        speak(textToSpeak, undefined, () => setVortexState("idle"));
+      } else {
+        setVortexState("idle");
+      }
+    } catch (error: any) {
+      const fallbackMessage = error.response?.data?.message || "Conexão com a Singularidade interrompida.";
+      setLastSpokenText(fallbackMessage);
+      speak(fallbackMessage, undefined, () => setVortexState("idle"));
+    }
+  }, [currentNickname, keepAudioAlive]);
+
+  // =========================================================================
+  // NOVO PROTOCOLO DE ÁUDIO NATIVO (ELECTRON BYPASS)
+  // =========================================================================
+  const processAudioBlob = useCallback(async (audioBlob: Blob) => {
+    setVortexState("processing");
+    const electron = (window as any).electronAPI;
+
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "command.webm");
+      formData.append("uid", import.meta.env.VITE_OPERATOR_UID || "Walker");
+      formData.append("clientSource", electron ? "ELECTRON" : "WEB");
+
+      const response = await api.post('/interact/audio', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const data = response.data;
+
+      // Executa os comandos OS retornados pelo Backend, mantendo a arquitetura intacta
       if (data.osCommand && electron) {
         electron.sendOSCommand(data.osCommand);
       }
@@ -132,70 +171,73 @@ export function useGhostVoice(): GhostVoiceResult {
       const textToSpeak = data.response || data.reply;
       if (textToSpeak) {
         setLastSpokenText(textToSpeak);
-        speak(textToSpeak, undefined, () => setVortexState("listening"));
+        speak(textToSpeak, undefined, () => setVortexState("idle"));
       } else {
-        setVortexState("listening");
+        setVortexState("idle");
       }
-    } catch (error) {
-      const errorMsg = "Conexão com a Singularidade interrompida.";
-      setLastSpokenText(errorMsg);
-      speak(errorMsg, undefined, () => setVortexState("idle"));
+    } catch (error: any) {
+      const fallbackMessage = error.response?.data?.message || "Senhor, falha ao transmitir pacote de áudio.";
+      setLastSpokenText(fallbackMessage);
+      speak(fallbackMessage, undefined, () => setVortexState("idle"));
     }
-  }, [currentNickname, keepAudioAlive]);
+  }, []);
 
-  const startListening = useCallback(() => {
-    if (!isSupported || recognitionRef.current) return;
-
-    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = "pt-BR";
-
-    recognition.onresult = (event: any) => {
-      const last = event.results[event.results.length - 1];
-      if (last.isFinal) {
-        processCommand(last[0].transcript);
-      }
-    };
-
-    recognition.onend = () => {
-      recognitionRef.current = null;
-      restartTimeoutRef.current = setTimeout(startListening, 100);
-    };
+  const startRecording = useCallback(async () => {
+    if (!isSupported) return;
 
     try {
-      recognition.start();
-      recognitionRef.current = recognition;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        processAudioBlob(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
       setVortexState("listening");
+      
     } catch (err) {
-      restartTimeoutRef.current = setTimeout(startListening, 1000);
+      console.error("GHOST >> Microfone bloqueado.", err);
+      setVortexState("idle");
     }
-  }, [isSupported, processCommand]);
+  }, [isSupported, processAudioBlob]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
 
   // CICLO DE VIDA E CLEANUP DE PROTOCOLO IPC
   useEffect(() => {
-    startListening();
     const pulse = setInterval(keepAudioAlive, 25000);
-
-    // Incremento de Auditoria: Escuta os resultados vindos do Main Process
     const electron = (window as any).electronAPI;
     let removeListener: (() => void) | undefined;
 
     if (electron && electron.onCommandResult) {
       removeListener = electron.onCommandResult((data: any) => {
         console.log("GHOST >> Auditoria de Comando:", data);
-        // Aqui você pode disparar sons ou feedbacks visuais de sucesso/erro
       });
     }
 
     return () => {
       clearInterval(pulse);
-      if (removeListener) removeListener(); // <--- CLEANUP ESSENCIAL
-      if (recognitionRef.current) try { recognitionRef.current.stop(); } catch {}
-      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      if (removeListener) removeListener();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
     };
-  }, [startListening, keepAudioAlive]);
+  }, [keepAudioAlive]);
 
-  return { vortexState, currentNickname, lastSpokenText, isSupported, startListening };
+  return { vortexState, currentNickname, lastSpokenText, isSupported, startRecording, stopRecording, processTextCommand };
 }

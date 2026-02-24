@@ -1,33 +1,32 @@
 import { motion } from "framer-motion";
 import Vortex from "@/components/Vortex";
-import TerminalContainer from "@/components/TerminalContainer"; // Novo módulo
+import TerminalContainer from "@/components/TerminalContainer";
 import { useGhostVoice } from "@/hooks/useGhostVoice";
-import { useEffect } from "react";
 
 const Dashboard = () => {
-  const { vortexState, startListening } = useGhostVoice();
-
-  // Garante que a escuta inicie assim que o componente montar
-  useEffect(() => {
-    startListening();
-  }, [startListening]);
+  // 1. Extraímos os novos controles de gravação
+  const { vortexState, startRecording, stopRecording } = useGhostVoice();
 
   return (
-    <div 
-      className="h-full flex flex-col items-center justify-center relative bg-black cursor-pointer overflow-hidden"
-      onClick={startListening}
-    >
+    <div className="h-full flex flex-col items-center justify-center relative bg-black overflow-hidden">
       {/* Background Grid sutil para profundidade */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]" />
 
-      {/* Núcleo Central: Vortex */}
+      {/* Núcleo Central: Vortex com Sensores Táteis */}
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
         className="z-10"
       >
-        <Vortex state={vortexState} size={320} />
+        {/* 2. Conectamos os sensores no Vortex */}
+        <Vortex 
+          state={vortexState} 
+          size={320} 
+          onPointerDown={startRecording}
+          onPointerUp={stopRecording}
+          onPointerLeave={stopRecording}
+        />
       </motion.div>
       
       {/* Interface de Telemetria: Terminal fixado no canto inferior direito */}
